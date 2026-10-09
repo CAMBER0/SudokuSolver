@@ -80,3 +80,87 @@ def find_naked_single(candidates):
 
     return None
 
+def find_hidden_single(candidates):
+
+    for row in range(9):
+        for number in range(1,10):
+            possible_cells = []
+
+            for col in range(9):
+                if number in candidates.get((row, col), set()):
+                    possible_cells.append((row, col))
+
+            if len(possible_cells) == 1:
+                r, c = possible_cells[0]
+                return r, c, number, "row"
+
+    for col in range(9):
+        for number in range(1,10):
+            possible_cells = []
+
+            for row in range(9):
+                if number in candidates.get((row, col), set()):
+                    possible_cells.append((row, col))
+
+            if len(possible_cells) == 1:
+                r, c = possible_cells[0]
+                return r, c, number, "column"
+
+    for box_row in range(0,9,3):
+        for box_col in range(0,9,3):
+                for number in range(1,10):
+                    possible_cells = []
+
+                    for row in range(box_row, box_row + 3):
+                        for col in range(box_col, box_col + 3):
+                            if number in candidates.get(
+                                (row, col), set()
+                            ):
+                                possible_cells.append((row, col))
+
+                    if len(possible_cells) == 1:
+                        r, c = possible_cells[0]
+                        return r, c, number, "box"
+
+    return None
+
+def apply_move(board, row, col, number):
+    if board[row][col] != 0:
+        raise ValueError("Cell is already filled.")
+
+    if not is_valid(board, row, col, number):
+        raise ValueError("Invalid Sudoku move.")
+
+    board[row][col] = number
+
+def solve_logically(board):
+    while True:
+        candidates = get_all_candidates(board)
+
+        naked = find_naked_single(candidates)
+
+        if naked is not None:
+            row, col, number = naked
+            apply_move(board, row, col, number)
+
+            print(
+                f"Naked single: {number} at "
+                f"({row + 1}, {col + 1})"
+            )
+            continue
+
+        hidden = find_hidden_single(candidates)
+
+        if hidden is not None:
+            row, col, number, unit = hidden
+            apply_move(board, row, col, number)
+
+            print(
+                f"Hidden single {unit}: "
+                f"{number} at ({row + 1}, {col + 1})"
+            )
+            continue
+
+        break
+
+    return all(0 not in row for row in board)
