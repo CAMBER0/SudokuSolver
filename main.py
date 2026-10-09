@@ -1,6 +1,4 @@
-from solver import solve
-
-from solver import solve
+from solver import get_all_candidates, find_naked_single
 
 board = [
     [5, 3, 0, 0, 7, 0, 0, 0, 0],
@@ -14,13 +12,24 @@ board = [
     [0, 0, 0, 0, 8, 0, 0, 7, 9]
 ]
 
-print("Original Sudoku:")
-for row in board:
-    print(row)
+candidates = get_all_candidates(board)
 
-if solve(board):
-    print("\nSolved Sudoku:")
-    for row in board:
-        print(row)
+for (row, col), nums in sorted(candidates.items()):
+    print(
+        f"Row {row + 1}, column {col + 1}: "
+        f"{sorted(nums)}"
+    )
+
+
+move = find_naked_single(candidates)
+
+if move is not None:
+    row, col, number = move
+
+    print(
+        f"\nNaked single found: "
+        f"Place {number} at "
+        f"row {row + 1}, column {col + 1}"
+    )
 else:
-    print("No solution found.")
+    print("\nNo naked singles found.")

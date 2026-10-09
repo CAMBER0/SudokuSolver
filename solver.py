@@ -6,20 +6,25 @@ def find_empty(board):
 
     return None
 
-def is_valid(board, row, col, num):
-    for num in board[row]:
+def is_valid(board, row, col, number):
+
+    if board[row][col] != 0:
         return False
 
-    for r in range(9):
-        if board[r][col] == num:
+    for c in range(9):
+        if board[row][c] == number:
             return False
 
-    box_row = (row // 3) * 3
-    box_col = (col // 3) * 3
+    for r in range(9):
+        if board[r][col] == number:
+            return False
 
-    for r in range(box_row, box_row + 3):
-        for c in range(box_col, box_col + 3):
-            if board[r][c] == num:
+    start_row = (row // 3) * 3
+    start_col = (col // 3) * 3
+
+    for r in range(start_row, start_row + 3):
+        for c in range(start_col, start_col + 3):
+            if board[r][c] == number:
                 return False
 
     return True
@@ -43,3 +48,35 @@ def solve(board):
             board[row][col] = 0
 
     return False
+
+def get_candidates(board, row, col):
+
+    if board[row][col] != 0:
+        return set()
+
+    candidates = set()
+
+    for number in range(1, 10):
+        if is_valid(board, row, col, number):
+            candidates.add(number)
+
+    return candidates
+
+def get_all_candidates(board):
+    candidates = {}
+    for row in range(9):
+        for col in range(9):
+            if board[row][col] == 0:
+                candidates[(row, col)] = get_candidates(
+                    board, row, col
+                )
+
+    return candidates
+
+def find_naked_single(candidates):
+    for (row, col), numbers in sorted(candidates.items()):
+        if len(numbers) == 1:
+            return row, col, numbers.pop()
+
+    return None
+
