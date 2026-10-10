@@ -1,3 +1,5 @@
+from itertools import combinations
+
 def find_empty(board):
     for row in range(9):
         for col in range(9):
@@ -246,6 +248,68 @@ def solve_logically(board):
             print(f"  Eliminated from: {', '.join(removed)}")
             continue
 
+        claiming = find_claiming_pair(candidates, board)
+
+        if claiming is not None:
+            apply_eliminations(candidates, claiming)
+            steps += 1
+
+            source = [
+                f"R{r+1}C{c+1}"
+                for r, c in claiming["source"]
+            ]
+
+            removed = [
+                f"R{r+1}C{c+1}"
+                for r, c in claiming["eliminations"]
+            ]
+
+            print(
+                f"Step {steps}: {claiming['strategy']} "
+                f"for number {claiming['number']}"
+            )
+
+            print(f"  Source: {', '.join(source)}")
+            print(f"  Eliminated from: {', '.join(removed)}")
+
+            continue
+
+        naked_group = None
+
+        for size in (2, 3):
+            naked_group = find_naked_group(candidates, size)
+
+            if naked_group is not None:
+                break
+
+        if naked_group is not None:
+            apply_naked_eliminations(candidates, naked_group)
+            steps += 1
+
+            source = [
+                f"R{r+1}C{c+1}"
+                for r, c in naked_group["source"]
+            ]
+
+            removed = [
+                f"{num} from R{cell[0]+1}C{cell[1]+1}"
+                for cell, num in naked_group["eliminations"]
+            ]
+
+            print(
+                f"Step {steps}: {naked_group['strategy']} "
+                f"in {naked_group['unit']}"
+            )
+
+            print(
+                f"  Numbers: "
+                f"{sorted(naked_group['numbers'])}"
+            )
+            print(f"  Source: {', '.join(source)}")
+            print(f"  Eliminations: {', '.join(removed)}")
+
+            continue
+        
         print(f"\nNo further logical moves after {steps} steps.")
         return False
 
@@ -335,9 +399,154 @@ def find_pointing_pair(candidates, board):
 
     return None
 
+def find_claiming_pair(candidates, board):
+
+    for direction in ("row", "column"):
+        for index in range(9):
+            for number in range(1, 10):
+
+                if direction == "row":
+                    cells = [(index, c) for c in range(9)]
+                else:
+                    cells = [(r, index) for r in range(9)]
+
+                if any(board[r][c] == number for r, c in cells):
+                    continue
+
+                possible_cells = [
+                    (r, c)
+                    for r, c in cells
+                    if number in candidates.get((r, c), set())
+                ]
+
+                if not 2 <= len(possible_cells) <= 3:
+                    continue
+
+                boxes = {
+                    (r // 3, c // 3)
+                    for r, c in possible_cells
+                }
+
+                if len(boxes) != 1:
+                    continue
+
+                box_r, box_c = next(iter(boxes))
+
+                eliminations = []
+
+                for r in range(box_r * 3, box_r * 3 + 3):
+                    for c in range(box_c * 3, box_c * 3 + 3):
+
+                        # Skip cells in the original row/column
+                        if (r, c) in cells:
+                            continue
+
+                        if number in candidates.get((r, c), set()):
+                            eliminations.append((r, c))
+
+                if eliminations:
+                    return {
+                        "strategy": (
+                            "Claiming Pair"
+                            if len(possible_cells) == 2
+                            else "Claiming Triple"
+                        ),
+                        "number": number,
+                        "direction": direction,
+                        "source": possible_cells,
+                        "eliminations": eliminations
+                    }
+
+    return None
+
 def apply_eliminations(candidates, result):
     number = result["number"]
 
     for row, col in result["eliminations"]:
         candidates[(row, col)].discard(number)
-    
+
+def find_naked_group(candidates, group_size):
+
+    if group_size not in (2, 3):
+        raise ValueError("Group size must be 2 or 3")
+
+    units = []
+
+    for row in range(9):
+        units.append((
+            "row",
+            [(row, col) for col in range(9)]
+        ))
+
+    for col in range(9):
+        units.append((
+            "column",
+            [(row, col) for row in range(9)]
+        ))
+
+    for box_row in range(0, 9, 3):
+        for box_col in range(0, 9, 3):
+            units.append((
+                "box",
+                [
+                    (r, c)
+                    for r in range(box_row, box_row + 3)
+                    for c in range(box_col, box_col + 3)
+                ]
+            ))
+
+    for unit_type, cells in units:
+
+        eligible = [
+            cell for cell in cells
+            if 2 <= len(candidates.get(cell, set())) <= group_size
+        ]
+
+        for group in combinations(eligible, group_size):
+
+            numbers = set()
+
+            for cell in group:
+                numbers.update(candidates[cell])
+
+            if len(numbers) != group_size:
+                continue
+
+            other_cells = [
+                cell for cell in cells
+                if cell in candidates and cell not in group
+            ]
+
+            if any(
+                candidates[cell] and
+                candidates[cell].issubset(numbers)
+                for cell in other_cells
+            ):
+                continue
+
+            eliminations = []
+
+            for cell in other_cells:
+                for number in numbers:
+                    if number in candidates[cell]:
+                        eliminations.append((cell, number))
+
+            if eliminations:
+                return {
+                    "strategy": (
+                        "Naked Pair"
+                        if group_size == 2
+                        else "Naked Triple"
+                    ),
+                    "unit": unit_type,
+                    "source": list(group),
+                    "numbers": numbers,
+                    "eliminations": eliminations
+                }
+
+    return None
+
+def apply_naked_eliminations(candidates, result):
+
+    for (row, col), number in result["eliminations"]:
+        candidates[(row, col)].discard(number)
