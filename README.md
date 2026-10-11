@@ -1,1 +1,1 @@
-A Python Sudoku solver using recursive backtracking, developed for Hack Club Terra.
+A Python Sudoku solver using many solving methods to finish the puzzle
