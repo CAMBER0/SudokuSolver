@@ -127,8 +127,15 @@ class SudokuApp:
             buttons,
             text="Load Example",
             width=13,
-            command=self.clear
+            command=self.load_example
         ).grid(row=0, column=2, padx=5)
+
+        tk.Button(
+            buttons,
+            text="Clear Board",
+            width=11,
+            command=self.clear
+        ).grid(row=0, column=4, padx=5)
 
         tk.Label(
             root,
