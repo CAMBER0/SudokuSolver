@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sudoku Solver</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#172235;background:#f4f6fa}
+    *{box-sizing:border-box}
+    main{max-width:600px;margin:30px auto;padding:20px}
+    h1{text-align:center;margin-bottom:5px}
+    .subtitle{text-align:center;color:#64748b;margin-top:0}
+    #board{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));border:3px solid #263345;max-width:495px;margin:25px auto;background:white}
+    #board input{min-width:0;width:100%;aspect-ratio:1;border:0;border-right:1px solid #ccd5e0;border-bottom:1px solid #ccd5e0;text-align:center;font-size:clamp(16px,4vw,25px);font-weight:600;color:#172235;background:transparent;border-radius:0;outline-offset:-3px}
+    #board input:nth-child(6n){background:transparent}
+    #board input.box-shade{background:#edf2f9}
+    #board input.box-right{border-right:3px solid #263345}
+    #board input.box-bottom{border-bottom:3px solid #263345}
+    #board input.filled{color:#2169cc}
+    .actions{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+    button{background:#245cdb;color:white;border:0;padding:12px 16px;border-radius:9px;font:inherit;font-weight:600;cursor:pointer}
+    button.secondary{background:#e2e8f0;color:#172235}
+    button:disabled{opacity:.55;cursor:wait}
+    #status{text-align:center;min-height:24px;margin:18px 0;color:#475569}
+    details{background:white;padding:14px;border-radius:10px;border:1px solid #dce4ee}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:260px;overflow:auto}
+    .note{font-size:13px;text-align:center;color:#64748b;margin-top:18px}
+  </style>
+  <script src="https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.js"></script>
+</head>
+<body>
+<main>
+  <h1>Sudoku Solver</h1>
+  <p class="subtitle">Logical Sudoku solving with Python</p>
+  <div id="board" aria-label="Sudoku grid"></div>
+  <div class="actions">
+    <button id="solve" disabled>Solve</button>
+    <button id="example" class="secondary">Load Example</button>
+    <button id="clear" class="secondary">Clear</button>
+  </div>
+  <p id="status" role="status">Loading Python engine…</p>
+  <details><summary>View solving steps</summary><pre id="steps">No steps yet.</pre></details>
+  <p class="note">Some difficult puzzles may only be partially solved. First load requires an internet connection.</p>
+</main>
+<script>
+const EXAMPLE = [
+ [5,3,0,0,7,0,0,0,0],
+ [6,0,0,1,9,5,0,0,0],
+ [0,9,8,0,0,0,0,6,0],
+ [8,0,0,0,6,0,0,0,3],
+ [4,0,0,8,0,3,0,0,1],
+ [7,0,0,0,2,0,0,0,6],
+ [0,6,0,0,0,0,2,8,0],
+ [0,0,0,4,1,9,0,0,5],
+ [0,0,0,0,8,0,0,7,9]
+];
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const stepsEl = document.getElementById('steps');
+const solveButton = document.getElementById('solve');
+let python = null;
+const cells = [];
+for (let r=0;r<9;r++) {
+  const row = [];
+  for (let c=0;c<9;c++) {
+    const input = document.createElement('input');
+    input.type = 'text'; input.inputMode = 'numeric'; input.maxLength = 1;
+    input.setAttribute('aria-label', `Row ${r+1}, column ${c+1}`);
+    if ((Math.floor(r/3)+Math.floor(c/3))%2) input.classList.add('box-shade');
+    if (c===2 || c===5) input.classList.add('box-right');
+    if (r===2 || r===5) input.classList.add('box-bottom');
+    input.addEventListener('input', () => {
+      input.value = input.value.replace(/[^1-9]/g,'').slice(0,1);
+      input.classList.remove('filled');
+    });
+    input.addEventListener('keydown', e => {
+      const dirs={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]};
+      if (dirs[e.key]) {
+        e.preventDefault();
+        const [dr,dc]=dirs[e.key];
+        cells[Math.max(0,Math.min(8,r+dr))][Math.max(0,Math.min(8,c+dc))].focus();
+      }
+    });
+    boardEl.appendChild(input); row.push(input);
+  }
+  cells.push(row);
+}
+function readBoard(){return cells.map(row=>row.map(input=>Number(input.value)||0));}
+function showBoard(board, original=null){
+  board.forEach((row,r)=>row.forEach((n,c)=>{
+    cells[r][c].value=n?String(n):'';
+    cells[r][c].classList.toggle('filled',Boolean(original && !original[r][c] && n));
+  }));
+}
+function validBoard(board){
+  const units=[];
+  for(let i=0;i<9;i++) {
+    units.push(board[i],board.map(row=>row[i]));
+  }
+  for(let br=0;br<9;br+=3) for(let bc=0;bc<9;bc+=3) {
+    const unit=[];
+    for(let r=br;r<br+3;r++) for(let c=bc;c<bc+3;c++) unit.push(board[r][c]);
+    units.push(unit);
+  }
+  return units.every(unit=>{
+    const values=unit.filter(n=>n!==0);
+    return values.length===new Set(values).size;
+  });
+}
+document.getElementById('example').onclick=()=>{
+  showBoard(EXAMPLE);stepsEl.textContent='No steps yet.';statusEl.textContent='Example loaded.';
+};
+document.getElementById('clear').onclick=()=>{
+  showBoard(Array.from({length:9},()=>Array(9).fill(0)));
+  stepsEl.textContent='No steps yet.';statusEl.textContent='Board cleared.';
+};
+async function initialize(){
+  try {
+    python=await loadPyodide();
+    const response=await fetch('./solver.py');
+    if(!response.ok) throw new Error('Could not load solver.py (HTTP '+response.status+')');
+    python.FS.writeFile('/home/pyodide/solver.py',await response.text());
+    await python.runPythonAsync('import solver');
+    solveButton.disabled=false;
+    statusEl.textContent='Ready. Enter a puzzle or load the example.';
+  } catch(error) {
+    statusEl.textContent='Loading error: '+error.message;
+    console.error(error);
+  }
+}
+solveButton.onclick=async()=>{
+  if(!python)return;
+  const original=readBoard();
+  if(!validBoard(original)){
+    statusEl.textContent='Invalid puzzle: duplicate numbers in a row, column, or box.';return;
+  }
+  if(original.every(row=>row.every(n=>n!==0))){
+    statusEl.textContent='This board is already complete and valid.';return;
+  }
+  solveButton.disabled=true;
+  statusEl.textContent='Solving…';
+  await new Promise(resolve=>setTimeout(resolve,0));
+  try {
+    python.globals.set('board_json',JSON.stringify(original));
+    const resultJson=await python.runPythonAsync(`
+import json, io, contextlib
+import solver
+work_board = json.loads(board_json)
+log = io.StringIO()
+with contextlib.redirect_stdout(log):
+    completed = solver.solve_logically(work_board)
+json.dumps({'board': work_board, 'completed': bool(completed), 'log': log.getvalue()})
+`);
+    const result=JSON.parse(resultJson);
+    stepsEl.textContent=result.log||'No deductions logged.';
+    if(!validBoard(result.board)) {
+      statusEl.textContent='Solver produced an invalid result. Original board preserved.';
+      return;
+    }
+    // A solver must never alter the user's original clues.
+    if(original.some((row,r)=>row.some((n,c)=>n!==0 && result.board[r][c]!==n))) {
+      statusEl.textContent='Solver changed an original clue. Original board preserved.';
+      return;
+    }
+    showBoard(result.board,original);
+    const remaining=result.board.flat().filter(n=>n===0).length;
+    statusEl.textContent=remaining===0?'Puzzle solved!':`Partial solution: ${remaining} empty cells remain.`;
+  } catch(error){
+    statusEl.textContent='Solver error: '+error.message;
+    console.error(error);
+  } finally {solveButton.disabled=false;}
+};
+initialize();
+</script>
+</body>
+</html>
