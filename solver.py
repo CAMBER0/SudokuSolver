@@ -1,4 +1,5 @@
 from itertools import combinations
+from collections import defaultdict, deque
 
 def find_empty(board):
     for row in range(9):
@@ -572,6 +573,18 @@ def solve_logically(board):
             print(f"  Eliminations: {skyscraper['eliminations']}")
             continue
 
+        advanced = find_new_advanced_move(candidates, board)
+
+        if advanced is not None:
+            apply_naked_eliminations(candidates, advanced)
+            steps += 1
+
+            print(f"Step {steps}: {advanced['strategy']}")
+            print(f"  Source: {advanced['source']}")
+            print(f"  Numbers: {sorted(advanced['numbers'])}")
+            print(f"  Eliminations: {advanced['eliminations']}")
+
+            continue
         
         print(f"\nNo further logical moves after {steps} steps.")
         return False
@@ -1194,5 +1207,497 @@ def find_skyscraper(candidates, board):
                                 "numbers": {number},
                                 "eliminations": eliminations
                             }
+
+    return None
+
+
+def advanced_units():
+    """Return all 27 Sudoku units: rows, columns, boxes."""
+    units = []
+
+    for r in range(9):
+        units.append(("row", [(r, c) for c in range(9)]))
+
+    for c in range(9):
+        units.append(("column", [(r, c) for r in range(9)]))
+
+    for br in range(0, 9, 3):
+        for bc in range(0, 9, 3):
+            cells = [
+                (r, c)
+                for r in range(br, br + 3)
+                for c in range(bc, bc + 3)
+            ]
+            units.append(("box", cells))
+
+    return units
+
+
+def advanced_sees(a, b):
+    """Return True if two distinct cells share a unit."""
+    if a == b:
+        return False
+
+    r1, c1 = a
+    r2, c2 = b
+
+    return (
+        r1 == r2
+        or c1 == c2
+        or (r1 // 3 == r2 // 3 and c1 // 3 == c2 // 3)
+    )
+
+
+def advanced_result(name, unit, source, numbers, eliminations):
+    """Create a standard strategy result."""
+    return {
+        "strategy": name,
+        "unit": unit,
+        "source": list(source),
+        "numbers": set(numbers),
+        "eliminations": list(dict.fromkeys(eliminations))
+    }
+
+
+def advanced_strong_links(candidates, board, number):
+    """Find pairs of cells forming strong links for a number."""
+    links = set()
+
+    for unit_type, cells in advanced_units():
+        # Ignore units where the number is already placed
+        if any(board[r][c] == number for r, c in cells):
+            continue
+
+        positions = [
+            cell for cell in cells
+            if number in candidates.get(cell, set())
+        ]
+
+        if len(positions) == 2:
+            links.add(tuple(sorted(positions)))
+
+    return sorted(links)
+
+
+# ============================================================
+# 1. NAKED QUAD
+# ============================================================
+
+def find_naked_quad(candidates, board):
+    """Find four cells restricted to exactly four numbers."""
+
+    for unit_type, cells in advanced_units():
+
+        eligible = [
+            cell for cell in cells
+            if 2 <= len(candidates.get(cell, set())) <= 4
+        ]
+
+        for group in combinations(eligible, 4):
+            numbers = set()
+
+            for cell in group:
+                numbers.update(candidates[cell])
+
+            if len(numbers) != 4:
+                continue
+
+            eliminations = []
+
+            for cell in cells:
+                if cell in group or cell not in candidates:
+                    continue
+
+                for number in numbers:
+                    if number in candidates[cell]:
+                        eliminations.append((cell, number))
+
+            if eliminations:
+                return advanced_result(
+                    "Naked Quad",
+                    unit_type,
+                    group,
+                    numbers,
+                    eliminations
+                )
+
+    return None
+
+
+# ============================================================
+# 2. HIDDEN QUAD
+# ============================================================
+
+def find_hidden_quad(candidates, board):
+    """Find four numbers confined to exactly four cells."""
+
+    for unit_type, cells in advanced_units():
+
+        placed = {
+            board[r][c]
+            for r, c in cells
+            if board[r][c] != 0
+        }
+
+        available_numbers = set(range(1, 10)) - placed
+
+        for group in combinations(sorted(available_numbers), 4):
+            numbers = set(group)
+
+            positions = {
+                number: {
+                    cell for cell in cells
+                    if number in candidates.get(cell, set())
+                }
+                for number in numbers
+            }
+
+            # Every number must have at least one location
+            if any(not positions[n] for n in numbers):
+                continue
+
+            group_cells = set().union(*positions.values())
+
+            if len(group_cells) != 4:
+                continue
+
+            eliminations = []
+
+            for cell in sorted(group_cells):
+                for number in candidates[cell] - numbers:
+                    eliminations.append((cell, number))
+
+            if eliminations:
+                return advanced_result(
+                    "Hidden Quad",
+                    unit_type,
+                    sorted(group_cells),
+                    numbers,
+                    eliminations
+                )
+
+    return None
+
+
+# ============================================================
+# 3. TWO-STRING KITE
+# ============================================================
+
+def find_two_string_kite(candidates, board):
+    """Find a two-string kite using row and column links."""
+
+    for number in range(1, 10):
+
+        row_links = []
+        col_links = []
+
+        # Find rows with exactly two positions
+        for r in range(9):
+            if number in board[r]:
+                continue
+
+            positions = [
+                (r, c) for c in range(9)
+                if number in candidates.get((r, c), set())
+            ]
+
+            if len(positions) == 2:
+                row_links.append(positions)
+
+        # Find columns with exactly two positions
+        for c in range(9):
+            if any(board[r][c] == number for r in range(9)):
+                continue
+
+            positions = [
+                (r, c) for r in range(9)
+                if number in candidates.get((r, c), set())
+            ]
+
+            if len(positions) == 2:
+                col_links.append(positions)
+
+        for row_link in row_links:
+            for col_link in col_links:
+
+                for near_row in row_link:
+                    for near_col in col_link:
+
+                        if near_row == near_col:
+                            continue
+
+                        # Near endpoints share a 3x3 box
+                        if (
+                            near_row[0] // 3 != near_col[0] // 3
+                            or near_row[1] // 3 != near_col[1] // 3
+                        ):
+                            continue
+
+                        far_row = next(
+                            cell for cell in row_link
+                            if cell != near_row
+                        )
+
+                        far_col = next(
+                            cell for cell in col_link
+                            if cell != near_col
+                        )
+
+                        if far_row == far_col:
+                            continue
+
+                        source = [
+                            near_row, near_col, far_row, far_col
+                        ]
+
+                        eliminations = []
+
+                        for cell, nums in candidates.items():
+                            if cell in source:
+                                continue
+
+                            if (
+                                number in nums
+                                and advanced_sees(cell, far_row)
+                                and advanced_sees(cell, far_col)
+                            ):
+                                eliminations.append((cell, number))
+
+                        if eliminations:
+                            return advanced_result(
+                                "Two-String Kite",
+                                "row/column",
+                                source,
+                                {number},
+                                eliminations
+                            )
+
+    return None
+
+
+# ============================================================
+# 4. W-WING
+# ============================================================
+
+def find_w_wing(candidates, board):
+    """Find two bivalue cells connected by a strong link."""
+
+    pairs = [
+        (cell, nums)
+        for cell, nums in candidates.items()
+        if len(nums) == 2
+    ]
+
+    for (cell1, nums1), (cell2, nums2) in combinations(pairs, 2):
+
+        if nums1 != nums2:
+            continue
+
+        # Both wings contain the same two candidates
+        for linked_number in sorted(nums1):
+
+            eliminated_number = next(
+                n for n in nums1 if n != linked_number
+            )
+
+            strong_links = advanced_strong_links(
+                candidates, board, linked_number
+            )
+
+            for end1, end2 in strong_links:
+
+                if end1 in (cell1, cell2):
+                    continue
+
+                if end2 in (cell1, cell2):
+                    continue
+
+                # Try both orientations of the link
+                orientations = [
+                    (end1, end2),
+                    (end2, end1)
+                ]
+
+                for link1, link2 in orientations:
+
+                    if not advanced_sees(cell1, link1):
+                        continue
+
+                    if not advanced_sees(cell2, link2):
+                        continue
+
+                    eliminations = []
+
+                    for cell, nums in candidates.items():
+                        if cell in (cell1, cell2):
+                            continue
+
+                        if (
+                            eliminated_number in nums
+                            and advanced_sees(cell, cell1)
+                            and advanced_sees(cell, cell2)
+                        ):
+                            eliminations.append(
+                                (cell, eliminated_number)
+                            )
+
+                    if eliminations:
+                        return advanced_result(
+                            "W-Wing",
+                            "strong link",
+                            [cell1, cell2, link1, link2],
+                            nums1,
+                            eliminations
+                        )
+
+    return None
+
+
+# ============================================================
+# 5. SIMPLE COLORING
+# ============================================================
+
+def find_simple_coloring(candidates, board):
+    """Use alternating strong-link chains for deductions."""
+
+    for number in range(1, 10):
+
+        # Build a graph of strong links
+        graph = defaultdict(set)
+
+        for a, b in advanced_strong_links(
+            candidates, board, number
+        ):
+            graph[a].add(b)
+            graph[b].add(a)
+
+        visited = set()
+
+        for start in sorted(graph):
+
+            if start in visited:
+                continue
+
+            colors = {start: 0}
+            queue = deque([start])
+            component = set()
+            conflict = False
+
+            # Assign alternating colors along each chain
+            while queue:
+                cell = queue.popleft()
+                component.add(cell)
+
+                for neighbor in graph[cell]:
+                    expected = 1 - colors[cell]
+
+                    if neighbor not in colors:
+                        colors[neighbor] = expected
+                        queue.append(neighbor)
+
+                    elif colors[neighbor] != expected:
+                        conflict = True
+
+            visited.update(component)
+
+            # Skip components that cannot be two-colored
+            if conflict:
+                continue
+
+            # COLOR WRAP:
+            # If two cells of one color see each other,
+            # that color cannot contain the number.
+            for color in (0, 1):
+                same_color = [
+                    cell for cell in component
+                    if colors[cell] == color
+                ]
+
+                contradiction = any(
+                    advanced_sees(a, b)
+                    for a, b in combinations(same_color, 2)
+                )
+
+                if contradiction:
+                    eliminations = [
+                        (cell, number)
+                        for cell in same_color
+                        if number in candidates.get(cell, set())
+                    ]
+
+                    if eliminations:
+                        return advanced_result(
+                            "Simple Coloring (Wrap)",
+                            "chain",
+                            sorted(component),
+                            {number},
+                            eliminations
+                        )
+
+            # COLOR TRAP:
+            # An uncolored candidate seeing both colors
+            # cannot contain the number.
+            eliminations = []
+
+            color0 = [
+                cell for cell in component
+                if colors[cell] == 0
+            ]
+
+            color1 = [
+                cell for cell in component
+                if colors[cell] == 1
+            ]
+
+            for cell, nums in candidates.items():
+
+                if cell in component or number not in nums:
+                    continue
+
+                sees_zero = any(
+                    advanced_sees(cell, other)
+                    for other in color0
+                )
+
+                sees_one = any(
+                    advanced_sees(cell, other)
+                    for other in color1
+                )
+
+                if sees_zero and sees_one:
+                    eliminations.append((cell, number))
+
+            if eliminations:
+                return advanced_result(
+                    "Simple Coloring (Trap)",
+                    "chain",
+                    sorted(component),
+                    {number},
+                    eliminations
+                )
+
+    return None
+
+
+# ============================================================
+# MASTER FUNCTION
+# ============================================================
+
+def find_new_advanced_move(candidates, board):
+    """Try the five new strategies in order."""
+
+    strategies = [
+        find_naked_quad,
+        find_hidden_quad,
+        find_two_string_kite,
+        find_w_wing,
+        find_simple_coloring
+    ]
+
+    for strategy in strategies:
+        result = strategy(candidates, board)
+
+        if result is not None and result["eliminations"]:
+            return result
 
     return None
